@@ -3,6 +3,7 @@
 # Tests is dividied at any point for user - customer, and in seperate test - for admin, for loan.
 
 
+from datetime import timedelta
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -18,6 +19,8 @@ class LoanApplicationTestCase(APITransactionTestCase):
     def setUp(self):
         self.user = Customer.objects.create_user(
             username="customer1",
+            first_name="John",
+            last_name="Doe",
             password="customerpassword",
             phone_number="12345678901",
             date_of_birth="1995-01-01",
@@ -32,7 +35,7 @@ class LoanApplicationTestCase(APITransactionTestCase):
         }
         response = self.client.post("/api/loans/", data, format="json")
 
-        self.assertEqual(response.status_code, status=status.HTTP_201_CREATED)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["status"], "PENDING")
 
     def test_cannot_submit_application_upon_rejected_application_same_day(self):
@@ -53,7 +56,7 @@ class LoanApplicationTestCase(APITransactionTestCase):
         }
 
         response = self.client.post("/api/loans/", data, format="json")
-        self.assertEqual(response.status_code, status=status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn(
             "You cannot submit a new application today due to a recent rejection.",
             response.data["error"],
@@ -90,7 +93,7 @@ class LoanApplicationTestCase(APITransactionTestCase):
         }
         response = self.client.post("/api/loans/", data, format="json")
 
-        self.assertEqual(response.status_code, status=status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("amount", response.data["error"])
         self.assertIn("must be a positive number", response.data["error"]["amount"])
 
@@ -98,10 +101,16 @@ class LoanApplicationTestCase(APITransactionTestCase):
 class LoanManagementTestCase(APITestCase):
     def setUp(self):
         self.admin = LoanAdmin.objects.create_user(
-            username="adminuser", password="adminpassword", role="ADMIN"
+            username="adminuser",
+            password="adminpassword",
+            role="ADMIN",
+            first_name="Admin",
+            last_name="User",
         )
         self.customer = Customer.objects.create_user(
             username="customeruser",
+            first_name="Bob",
+            last_name="Smith",
             password="customerpassword",
             phone_number="1234567890",
             date_of_birth="1990-01-01",
@@ -117,7 +126,7 @@ class LoanManagementTestCase(APITestCase):
         )
 
         response = self.client.get("/api/loans/")
-        self.assertEqual(response.status_code, status=status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 2)
 
     def test_admin_can_view_single_application(self):
@@ -125,7 +134,7 @@ class LoanManagementTestCase(APITestCase):
             amount=5000, loan_type="Personal", customer=self.customer, status="PENDING"
         )
         response = self.client.get(f"/api/loans/{loan.id}/")
-        self.assertEqual(response.status_code, status=status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["id"], loan.id)
         self.assertIn("amount_requested", response.data)
         self.assertIn("status", response.data)
@@ -135,7 +144,7 @@ class LoanManagementTestCase(APITestCase):
             amount=5000, loan_type="Personal", customer=self.customer, status="PENDING"
         )
         response = self.client.post(f"/api/loans/{loan.id}/approve/")
-        self.assertEqual(response.status_code, status=status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         loan.refresh_from_db()
         self.assertEqual(loan.status, "APPROVED")
 
@@ -144,7 +153,7 @@ class LoanManagementTestCase(APITestCase):
             amount=5000, loan_type="Personal", customer=self.customer, status="PENDING"
         )
         response = self.client.post(f"/api/loans/{loan.id}/reject/")
-        self.assertEqual(response.status_code, status=status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         loan.refresh_from_db()
         self.assertEqual(loan.status, "REJECTED")
 
@@ -154,38 +163,44 @@ class LoanManagementTestCase(APITestCase):
 
 
 class FraudDetectionTestCase(TestCase):
-      def setUp(self):
+    def setUp(self):
         self.user1 = Customer.objects.create_user(
+            first_name="John",
+            last_name="Doe",
             username="user1",
             password="password123",
             phone_number="1234567890",
             date_of_birth="1995-01-01",
-            email="user1@example.com"
+            email="user1@example.com",
         )
         self.user2 = Customer.objects.create_user(
+            first_name="Jane",
+            last_name="Doe",
             username="user2",
             password="password123",
             phone_number="0987654321",
             date_of_birth="1995-01-01",
-            email="user1@example.com"   # Same email as user1, we would test this later
+            email="user1@example.com",  # Same email as user1, we would test this later
         )
-        
+
     # Algorithm flags user for fraudlent attemts
-    def test_flaggd_for_duplicate_accounts():
+    def test_flaggd_for_duplicate_accounts(self):
         # This test checks if a user is flagged for creating multiple accounts
         duplicate_user = Customer.objects.create_user(
+            first_name="John",
+            last_name="Doe",
             username="user3",
             password="password123",
             phone_number="1234567890",
             date_of_birth="1995-01-01",
-            email="user3@example.com"
+            email="user3@example.com",
         )
         duplicate_user.email = "user1@example.com"  # Same email as existing user
         duplicate_user.save()
         # self.assertTrue(self.check_for_duplicate_accounts(duplicate_user)
         pass
 
-    def test_flagged_for_same_user_credentials():
+    def test_flagged_for_same_user_credentials(self):
         # this test is a tricky one - but simply,
         # we flag the user, if an only if a duplicate
         # user, with same First Name and same Last Name, same D.O.B, registers with a different
@@ -197,25 +212,25 @@ class FraudDetectionTestCase(TestCase):
             password="password123",
             phone_number="0987654321",
             date_of_birth="1995-01-01",
-            email="user4@example.com"
+            email="user4@example.com",
         )
         duplicate_user.first_name = "John"
         duplicate_user.last_name = "Doe"
         duplicate_user.save()
         self.assertTrue(self.check_for_duplicate_credentials(duplicate_user))
 
-    def test_flagged_for_same_email():
+    def test_flagged_for_same_email(self):
         # user's email domain is used by more than 10 different users
         pass
 
-    def test_flagged_user_ineligible_for_application():
+    def test_flagged_user_ineligible_for_application(self):
         pass
 
     # Algorithm flags loans for fraudulent patterns
-    def test_flagged_for_multiple_entries_within_24h():
+    def test_flagged_for_multiple_entries_within_24h(self):
         pass
 
-    def test_flagged_for_exceeding_maximum_amount():
+    def test_flagged_for_exceeding_maximum_amount(self):
         # maximum amount is set to 5,000,000
         # if a user applies for more than 5,000,000, they are flagged
 
@@ -225,12 +240,12 @@ class FraudDetectionTestCase(TestCase):
             "customer": self.user1.id,
         }
         response = self.client.post("/api/loans/", data, format="json")
-        self.assertIn('status', response.data)
-        self.assertEqual(response.status_code, status=status.HTTP_400_BAD_REQUEST)
+        self.assertIn("status", response.data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
         # i guess we should mock our fraud detection service here
 
-    def test_flagged_for_exagreated_needs():
+    def test_flagged_for_exagreated_needs(self):
         # we would use a simple calculator to determine, earning power
         # and therefore base a 5-8% range (random) (increase or decrease) of the
         # requested amount
