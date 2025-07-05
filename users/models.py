@@ -32,6 +32,11 @@ class BaseUser(AbstractUser):
         verbose_name="Last Name",
         help_text="The last name of the user. Required for all users.",
     )
+    email = models.EmailField(
+        max_length=254,
+        verbose_name="Email Address",
+        help_text="The email address of the user. Required for all users.",
+    )
     phone_number = models.CharField(
         max_length=11,
         unique=True,
@@ -72,15 +77,6 @@ class Customer(BaseUser):
 
     As a measure to prevent fraud, we require customers to provide their phone number and date of birth.
     """
-
-    # phone_number = models.CharField(
-    #     max_length=11,
-    #     unique=True,
-    #     help_text="Customer's phone number - must be 11 digits, without the country code",
-    # )
-    # date_of_birth = models.DateField(
-    #     help_text="Customer's date of birth",
-    # )
 
     # we require the phone number, for authentication
     # - the phone number without the leading zero
