@@ -43,7 +43,7 @@ class LoanApplication(models.Model):
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
-        default="pending",
+        default=Status.PENDING,
         help_text="Current status of the loan application",
     )
     date_applied = models.DateTimeField(
@@ -70,9 +70,7 @@ class LoanApplication(models.Model):
         fraud_flag = FraudFlag.objects.create(
             loan_application=self,
             reason=reason,
-            defaults={
-                "comments": comments,
-            },
+            comments=comments,
         )
         return fraud_flag
 

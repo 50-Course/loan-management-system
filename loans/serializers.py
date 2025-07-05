@@ -58,8 +58,10 @@ class LoanApplicationResponse(serializers.Serializer):
     Converts loan application model instances to a simplified JSON format.
     """
 
-    user = serializers.CharField(source="user.get_full_name")
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    full_name = serializers.CharField(source="user.get_full_name")
+    amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, source="amount_requested"
+    )
     purpose = serializers.CharField()
     status = serializers.CharField()
     date_applied = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")

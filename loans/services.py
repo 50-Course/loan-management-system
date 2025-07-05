@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils.timezone import timezone
 
 from loans.models import LoanApplication
-from users.models import Customer
+from users.models import BaseUser
 
 
 class LoanApplicationError(Exception):
@@ -14,14 +14,20 @@ class LoanApplicationError(Exception):
 
 
 @transaction.atomic
-def submit_loan(user: "Customer", amount: Decimal, purpose: str) -> "LoanApplication":
+def submit_loan(user: "BaseUser", amount: Decimal, purpose: str) -> "LoanApplication":
     from fraud.services import FraudDetectionError, FraudDetectionService
 
     fraud_detection_service = FraudDetectionService()
 
+    if not hasattr(user, "customer"):
+        raise LoanApplicationError("Only customers can submit loan applications.")
+
+    customer = user.customer
+
     # we are not using .create method because that would save our application
     # directly to the database, in-memory route is the way to go here so we can run our checks
-    loan = LoanApplication(user=user, amount_requested=amount, purpose=purpose)
+    loan = LoanApplication(user=customer, amount_requested=amount, purpose=purpose)
+
     fraud_check_result = fraud_detection_service.run_fraud_checks(loan)
 
     if fraud_check_result["status"] == "fraudlent":

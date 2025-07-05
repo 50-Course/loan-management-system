@@ -7,10 +7,10 @@ from datetime import timedelta
 from typing import Literal
 
 from django.utils import timezone
-from loans.models import LoanApplication
 
+from loans.models import LoanApplication
 from loans.services import LoanApplicationError
-from users.models import Customer
+from users.models import Customer, LoanAdmin
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,9 @@ class FraudDetectionService:
         AuditService.log_activity(
             f"Loan {loan.id} flagged for fraud: {', '.join(flags)}"
         )
-        AuditService.alert(self.admins)
+        admins = LoanAdmin.objects.values_list("email", flat=True)
+        if len(admins) > 0:
+            AuditService.alert(admins, message=f"Loan {loan.id} flagged for fraud.")
 
     def suspicious_email_domain(self, user: Customer) -> bool:
         """
@@ -124,7 +126,7 @@ class FraudDetectionService:
                 "User has submitted too many applications in the last 24 hours."
             )
 
-        if self.suspicious_email_domain(loan.user.email):
+        if self.suspicious_email_domain(loan.user):
             flags.append("Email domain is suspicious.")
 
         if self._amount_exceeds_limit(loan):
