@@ -38,12 +38,14 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             "username",
             "first_name",
             "last_name",
+            "email",
             "role",
             "password",
             "phone_number",
             "date_of_birth",
         )
         extra_kwargs = {
+            "email": {"required": True, "allow_blank": False},
             "phone_number": {"required": False},
             "date_of_birth": {"required": False},
         }
@@ -57,6 +59,10 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         if role == BaseUser.RoleType.CUSTOMER and "date_of_birth" not in attrs:
             raise serializers.ValidationError(
                 {"date_of_birth": "Date of birth is required for customers."}
+            )
+        if role == BaseUser.RoleType.CUSTOMER and "phone_number" not in attrs:
+            raise serializers.ValidationError(
+                {"phone_number": "Phone number is required for customers."}
             )
         return attrs
 
@@ -97,7 +103,7 @@ class UserRegistrationResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BaseUser
-        fields = ("full_name", "role")
+        fields = ("full_name", "username", "role")
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
