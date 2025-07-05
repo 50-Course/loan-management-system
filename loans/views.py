@@ -32,7 +32,8 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
     serializer_class = LoanApplicationRequest
     queryset = LoanApplication.objects.all()
 
-    # Override this to prevent 'list' from appearing
+    # overriden this to prevent 'list' and 'create' and every other builtin actions, from appearing
+    # ref: https://www.cdrf.co/3.14/rest_framework.viewsets/ModelViewSet.html#get_extra_actions
     @classmethod
     def get_extra_actions(cls):
         """
@@ -43,22 +44,10 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         """
         return []
 
-    # def get_queryset(self):
-    #     raise PermissionDenied("This action is not available.")
-
-    # Override this to prevent 'create' from appearing
-    def create(self, request, *args, **kwargs):
-        raise PermissionDenied("This action is not available.")
-
     @extend_schema(
         operation_id="customer_loan_retrieve",
         summary="Retrieve a specific loan application",
         description="Retrieve a specific loan application by ID for the authenticated customer.",
-        parameters=[
-            OpenApiParameter(
-                "id", type=int, description="Loan Application ID", required=True
-            )
-        ],
         responses={
             200: OpenApiResponse(
                 response=LoanApplicationResponse,
@@ -183,11 +172,6 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
         operation_id="admin_loan_retrieve",
         summary="Retrieve a specific loan application - Admin Only",
         description="Admin can view details of a specific loan application by ID",
-        parameters=[
-            OpenApiParameter(
-                "id", type=int, description="Loan Application ID", required=True
-            )
-        ],
         responses={
             200: OpenApiResponse(
                 response=LoanApplicationSerializer,
@@ -208,7 +192,6 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
         serializer = LoanApplicationSerializer(loan)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @action(detail=False, methods=["get"])
     @extend_schema(
         operation_id="admin_all_loans",
         summary="Retrieve all loan applications - Admin Only",
@@ -223,6 +206,7 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             500: OpenApiResponse(description="Internal server error"),
         },
     )
+    @action(detail=False, methods=["get"])
     def all_loans(self, request):
         """
         Admin can view all loan applications.
@@ -231,8 +215,8 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
         serializer = LoanApplicationSerializer(loans, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["post"], url_path="approve")
     @extend_schema(
+        operation_id="admin_loan_approve",
         summary="Approve a loan application - Admin Only",
         description="Approve a loan application",
         responses={
@@ -241,12 +225,8 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             403: OpenApiResponse(description="Permission denied"),
             500: OpenApiResponse(description="Internal server error"),
         },
-        parameters=[
-            OpenApiParameter(
-                "id", type=int, description="Loan Application ID", required=True
-            )
-        ],
     )
+    @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
         """
         Admin approves a loan application.
@@ -273,11 +253,6 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             403: OpenApiResponse(description="Permission denied"),
             500: OpenApiResponse(description="Internal server error"),
         },
-        parameters=[
-            OpenApiParameter(
-                "id", type=int, description="Loan Application ID", required=True
-            )
-        ],
     )
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, pk=None):
@@ -306,11 +281,6 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             403: OpenApiResponse(description="Permission denied"),
             500: OpenApiResponse(description="Internal server error"),
         },
-        parameters=[
-            OpenApiParameter(
-                "id", type=int, description="Loan Application ID", required=True
-            )
-        ],
     )
     @action(detail=True, methods=["post"], url_path="flag")
     def flag(self, request, pk=None):
