@@ -79,10 +79,5 @@ class UserRegisterView(APIView):
         response_data = {
             "message": "User registered successfully. Please log in to continue.",
             "data": response_serializer.data,
-            # "data": {
-            #     "username": user.username,
-            #     "full_name": user.get_full_name(),
-            #     "role": user.role,
-            # },
         }
         return Response(response_data, status=status.HTTP_201_CREATED)

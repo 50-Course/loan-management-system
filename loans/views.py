@@ -1,3 +1,5 @@
+import logging
+
 from drf_spectacular.utils import (OpenApiParameter, OpenApiRequest,
                                    OpenApiResponse, extend_schema,
                                    extend_schema_view)
@@ -16,6 +18,8 @@ from loans.services import LoanApplicationError, LoanManagementService
 from permissions import IsCustomer, IsLoanAdmin
 
 from .serializers import LoanApplicationRequest
+
+logger = logging.getLogger(__name__)
 
 
 @extend_schema(
@@ -133,15 +137,33 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         loan_data = serializer.validated_data
-
         try:
             loan = loan_service.submit_loan(
                 user, amount=loan_data["amount_requested"], purpose=loan_data["purpose"]
             )
             loan_response = LoanApplicationResponse(loan)
-            return Response(loan_response, status=status.HTTP_201_CREATED)
+            return Response(
+                {
+                    "message": "Loan application received. Please await approval. Application details",
+                    "data": loan_response.data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
         except FraudDetectionError as err:
             return Response({"error": str(err)}, status=status.HTTP_400_BAD_REQUEST)
+        except LoanApplicationError as err:
+            logger.error(f"Loan submission failed for user {user.id}: {str(err)}")
+            return Response(
+                {"message": "Loan submission failed.", "error": str(err)},
+                status=status.HTTP_403_FORBIDDEN
+                if "Only customers can submit loans" in str(err)
+                else status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 @extend_schema(
