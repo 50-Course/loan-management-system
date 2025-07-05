@@ -1,18 +1,39 @@
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics, serializers, status
 from rest_framework.decorators import api_view
+from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from users.models import Customer, LoanAdmin
 
-from .serializers import (AdminUserRegistrationSerializer,
-                          CustomerUserRegistrationSerializer,
-                          CustomTokenObtainPairSerializer)
+from .serializers import (CustomTokenObtainPairSerializer,
+                          UserRegistrationResponseSerializer,
+                          UserRegistrationSerializer)
 
 
-@extend_schema(tags=["Users"])
+@extend_schema(
+    tags=["Users"],
+    operation_id="authenticate_user",
+    summary="Login User",
+    description="Authenticate user and return JWT token.",
+    request=CustomTokenObtainPairSerializer,
+    responses={
+        status.HTTP_200_OK: OpenApiResponse(
+            description="User authenticated successfully.",
+            response=CustomTokenObtainPairSerializer,
+        ),
+        status.HTTP_400_BAD_REQUEST: OpenApiResponse(
+            description="Invalid credentials."
+        ),
+        status.HTTP_500_INTERNAL_SERVER_ERROR: OpenApiResponse(
+            description="Server error occurred."
+        ),
+    },
+)
 class UserLoginView(TokenObtainPairView):
     """
     User login for token authentication.
@@ -21,20 +42,47 @@ class UserLoginView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
 
-@extend_schema(tags=["Users"])
-class UserRegisterView(generics.CreateAPIView):
+@extend_schema(
+    tags=["Users"],
+    operation_id="register_user",
+    summary="Register User",
+    description="Register a new user on the platform - either as a Customer or an Admin.",
+    request=UserRegistrationSerializer,
+    responses={
+        status.HTTP_201_CREATED: OpenApiResponse(
+            description="User registered successfully.",
+            response=UserRegistrationResponseSerializer,
+        ),
+        status.HTTP_400_BAD_REQUEST: OpenApiResponse(
+            description="Invalid registration data.",
+        ),
+        status.HTTP_500_INTERNAL_SERVER_ERROR: OpenApiResponse(
+            description="Server error occurred.",
+        ),
+    },
+)
+class UserRegisterView(APIView):
     """
     Register new user (Customer or Admin).
     """
 
-    def get_serializer_class(self):
-        role = self.request.data.get("role")
+    authentication_classes = []
+    permission_classes = []
 
-        if role == "ADMIN":
-            return AdminUserRegistrationSerializer
-        elif role == "CUSTOMER":
-            return CustomerUserRegistrationSerializer
-        else:
-            raise serializers.ValidationError(
-                {"role": "Role must be either 'ADMIN' or 'CUSTOMER'."}
-            )
+    def post(self, request, *args, **kwargs):
+        serializer = UserRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        response_serializer = UserRegistrationResponseSerializer(user)
+
+        response_data = {
+            "message": "User registered successfully. Please log in to continue.",
+            "data": response_serializer.data,
+            # "data": {
+            #     "username": user.username,
+            #     "full_name": user.get_full_name(),
+            #     "role": user.role,
+            # },
+        }
+        return Response(response_data, status=status.HTTP_201_CREATED)
