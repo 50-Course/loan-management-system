@@ -22,6 +22,29 @@ class BaseUser(AbstractUser):
         help_text="Specific permissions for this user. Overrides django's default permissions.",
         related_query_name="baseuser",
     )
+    first_name = models.CharField(
+        max_length=30,
+        verbose_name="First Name",
+        help_text="The first name of the user. Required for all users.",
+    )
+    last_name = models.CharField(
+        max_length=30,
+        verbose_name="Last Name",
+        help_text="The last name of the user. Required for all users.",
+    )
+    phone_number = models.CharField(
+        max_length=11,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text="User's phone number - must be 11 digits, without the country code. Required for customers.",
+    )
+    date_of_birth = models.DateField(
+        blank=True,
+        null=True,
+        verbose_name="Date of Birth",
+        help_text="The date of birth of the user. Required for customers.",
+    )
 
     def __str__(self):
         return f"{self.get_full_name()} ({self.role})"
@@ -50,14 +73,14 @@ class Customer(BaseUser):
     As a measure to prevent fraud, we require customers to provide their phone number and date of birth.
     """
 
-    phone_number = models.CharField(
-        max_length=11,
-        unique=True,
-        help_text="Customer's phone number - must be 11 digits, without the country code",
-    )
-    date_of_birth = models.DateField(
-        help_text="Customer's date of birth",
-    )
+    # phone_number = models.CharField(
+    #     max_length=11,
+    #     unique=True,
+    #     help_text="Customer's phone number - must be 11 digits, without the country code",
+    # )
+    # date_of_birth = models.DateField(
+    #     help_text="Customer's date of birth",
+    # )
 
     # we require the phone number, for authentication
     # - the phone number without the leading zero
