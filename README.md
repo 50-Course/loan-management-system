@@ -1,5 +1,8 @@
 # Loan Management System
 
+[![tests](https://github.com/50-Course/loan-management-system/actions/workflows/test.yml/badge.svg)](https://github.com/50-Course/loan-management-system/actions/workflows/test.yml)
+[![codecov](https://img.shields.io/codecov/c/github/50-Course/loan-management-system?style=flat-square)](https://codecov.io/gh/50-Course/loan-management-system)
+
 Documentaton: [https://qc-loan-app-production.up.railway.app/docs/](https://qc-loan-app-production.up.railway.app/docs/)
 
 With built-in Fraud Detection Mechanism
