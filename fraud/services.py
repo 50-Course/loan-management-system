@@ -76,8 +76,8 @@ class FraudDetectionService:
         loan.save()
 
         for entry in flags:
-            reason = entry.get("reason")
-            comments = entry.get("comments", "")
+            reason = entry.reason
+            comments = entry.comments if hasattr(entry, "comments") else ""
             loan.flag_as_fraud(reason=reason, comments=comments)
 
         AuditService.log_activity(f"Loan {loan.id} flagged for fraud: {flags}")
