@@ -121,7 +121,4 @@ class LoanManagementService:
         fraud_detection_service = FraudDetectionService()
         fraud_detection_service.flag_loan(loan, flags)
 
-        AuditService.log_activity(
-            f"Loan flagged for: {flags} by admin: {loan.user.get_short_name()} | Timestamp: {timezone.now()}"
-        )
         return loan
