@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
@@ -34,6 +37,10 @@ class LoanApplication(models.Model):
         max_digits=10,
         decimal_places=2,
         help_text="Amount needed by the customer for the loan",
+        validators=[
+            MinValueValidator(Decimal("1000.00")),
+            MaxValueValidator(Decimal("5_000_000.00")),
+        ],
     )
     purpose = models.CharField(
         max_length=20,
