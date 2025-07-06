@@ -126,11 +126,12 @@ def fake_admin(password=None) -> tuple["LoanAdmin", str]:
 
 def fake_loan(customer: "Customer", **kwargs) -> "LoanApplication":
     status = kwargs.get("status", None)
+    purpose = kwargs.pop("purpose", None)
     amount_requested = kwargs.pop("amount_requested", None)
     return LoanApplication.objects.create(
         user=customer,
         amount_requested=amount_requested or random.randint(1000, 4_999_999),
-        purpose=random.choice(LoanApplication.Purpose.choices),
+        purpose=purpose or random.choice(LoanApplication.Purpose.choices),
         status="PENDING" if not status else status,
     )
 
