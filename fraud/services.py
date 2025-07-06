@@ -76,8 +76,15 @@ class FraudDetectionService:
         loan.save()
 
         for entry in flags:
-            reason = entry.reason
-            comments = entry.comments if hasattr(entry, "comments") else ""
+            if isinstance(entry, dict):
+                reason = entry.get("reason")
+                comments = entry.get("comments", "")
+            elif isinstance(entry, FraudFlag.Reason):
+                reason = entry.value
+                comments = ""
+            else:
+                raise ValueError(f"Unsupported flag entry: {entry}")
+
             loan.flag_as_fraud(reason=reason, comments=comments)
 
         AuditService.log_activity(f"Loan {loan.id} flagged for fraud: {flags}")
