@@ -11,7 +11,7 @@ jobs:
 
     steps:
       - name: checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: set up Python
         uses: actions/setup-python@v5
@@ -42,7 +42,7 @@ jobs:
             --cov-fail-under=80
 
       - name: push report  to codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5.4.3
         with:
           files: coverage.xml
           fail_ci_if_error: true
