@@ -1,5 +1,6 @@
 import logging
 
+from django.utils.html import ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (OpenApiParameter, OpenApiRequest,
                                    OpenApiResponse, extend_schema,
@@ -127,7 +128,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             ),
         },
     )
-    @action(detail=False, methods=["get"], url_path="requests")
+    @action(detail=False, methods=["get"], url_path="requests", url_name="my_loans")
     def my_applications(self, request):
         """
         Retrieve all loan applications for the authenticated user.
@@ -165,7 +166,7 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             ),
         },
     )
-    @action(detail=False, methods="post", url_path="loan")
+    @action(detail=False, methods="post", url_path="loan", url_name="submit_loan")
     def submit(self, request, *args, **kwargs):
         """
         Submit a new application
@@ -192,6 +193,19 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_201_CREATED,
             )
+        except ValidationError as err:
+            logger.error(f"Validation error during loan submission: {str(err)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "fail",
+                        "error": "Invalid data submitted.",
+                        "code": 400,
+                        "detail": str(err.detail),
+                    }
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except FraudDetectionError as err:
             logger.warning(f"Loan application flagged for fraud: {str(err)}")
             return Response(
@@ -201,12 +215,15 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except LoanApplicationError as err:
-            logger.error(f"Loan submission failed for user {user.id}: {str(err)}")
+            logger.error(
+                f"Loan submission failed for user {request.user.id}: {str(err)}"
+            )
+            status_code = 400 if "24 hours" in str(err).lower() else 403
             return Response(
                 ErrorResponseSerializer(
-                    {"status": "error", "error": str(err), "code": 403}
+                    {"status": "error", "error": str(err), "code": status_code}
                 ).data,
-                status=status.HTTP_403_FORBIDDEN,
+                status=status_code,
             )
         except PermissionDenied as err:
             logger.error(f"Permission denied for user {request.user.id}: {str(err)}")
@@ -309,7 +326,7 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             ),
         },
     )
-    @action(detail=False, methods=["get"])
+    @action(detail=False, methods=["get"], url_name="all_loans")
     def all_loans(self, request):
         """
         Admin can view all loan applications.
@@ -352,7 +369,7 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             ),
         },
     )
-    @action(detail=True, methods=["post"], url_path="approve")
+    @action(detail=True, methods=["post"], url_path="approve", url_name="approve_loan")
     def approve(self, request, id=None):
         """
         Admin approves a loan application.
@@ -365,7 +382,8 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
 
         loan_service = LoanManagementService()
         try:
-            loan = loan_service.approve_loan(id)
+            loan_obj = LoanApplication.objects.get(id=id)
+            loan = loan_service.approve_loan(loan_obj)
             loan_data = LoanApplicationResponse(loan).data
             return Response(
                 {
@@ -373,6 +391,17 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
                     "loan_details": loan_data,
                 },
                 status=status.HTTP_200_OK,
+            )
+        except LoanApplication.DoesNotExist:
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "error",
+                        "error": "Loan application not found",
+                        "code": 404,
+                    }
+                ).data,
+                status=status.HTTP_404_NOT_FOUND,
             )
         except LoanApplicationError as e:
             logger.error(f"Error approving loan {id}: {str(e)}")
@@ -396,7 +425,7 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             ),
         },
     )
-    @action(detail=True, methods=["post"], url_path="reject")
+    @action(detail=True, methods=["post"], url_path="reject", url_name="reject_loan")
     def reject(self, request, id=None):
         """
         Admin rejects a loan application.
@@ -409,7 +438,8 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            loan = loan_service.reject_loan(id)
+            loan_obj = LoanApplication.objects.get(id=id)
+            loan = loan_service.reject_loan(loan_obj)
             loan_data = LoanApplicationResponse(loan).data
             return Response(
                 {
@@ -417,6 +447,18 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
                     "loan_details": loan_data,
                 },
                 status=status.HTTP_200_OK,
+            )
+        except LoanApplication.DoesNotExist:
+            logger.error(f"Loan application {id} not found for rejection")
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "error",
+                        "error": "Loan application not found",
+                        "code": 404,
+                    }
+                ).data,
+                status=status.HTTP_404_NOT_FOUND,
             )
         except PermissionDenied as e:
             logger.error(f"Permission denied for rejecting loan {id}: {str(e)}")
@@ -459,7 +501,7 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             ),
         },
     )
-    @action(detail=True, methods=["post"], url_path="flag")
+    @action(detail=True, methods=["post"], url_path="flag", url_name="flag_loan")
     def flag(self, request, id=None):
         """
         Admin flags a loan application for potential fraud.
@@ -479,7 +521,8 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            loan = loan_service.flag_loan(id, validated_flags)  # type: ignore
+            loan_obj = LoanApplication.objects.get(id=id)
+            loan = loan_service.flag_loan(loan_obj, validated_flags)  # type: ignore
             return Response(
                 {
                     "status": "flagged",
@@ -488,6 +531,17 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
                     "flags": serializer.validated_data,
                 },
                 status=status.HTTP_200_OK,
+            )
+        except LoanApplication.DoesNotExist:
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "error",
+                        "error": "Loan application not found",
+                        "code": 404,
+                    }
+                ).data,
+                status=status.HTTP_404_NOT_FOUND,
             )
         except LoanApplicationError as err:
             return Response(
@@ -524,7 +578,7 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
             ),
         },
     )
-    @action(detail=False, methods=["get"], url_path="flagged")
+    @action(detail=False, methods=["get"], url_path="flagged", url_name="flagged_loans")
     def flagged_loans(self, request):
         """
         Admin-only endpoint to view all flagged loans

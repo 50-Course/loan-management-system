@@ -6,8 +6,11 @@ import logging
 from datetime import timedelta
 from typing import Literal
 
+from django.db.models import Q
 from django.utils import timezone
 
+from fraud.constants import CLEAN, FRAUD
+from fraud.models import FraudFlag
 from loans.models import LoanApplication
 from loans.services import LoanApplicationError
 from users.models import Customer, LoanAdmin
@@ -58,9 +61,6 @@ class FraudDetectionService:
         Automatically flag a loan as fraudulent.
         """
 
-        if loan.status != LoanApplication.Status.PENDING:
-            raise LoanApplicationError("Loan application is not in a pending state.")
-
         if not flags:
             raise ValueError("At least one flag must be provided.")
 
@@ -74,15 +74,19 @@ class FraudDetectionService:
 
         loan.status = LoanApplication.Status.FLAGGED
         loan.save()
-        loan.flag_as_fraud(
-            reason="Automated fraud detection", comments=", ".join(flags)
-        )
-        AuditService.log_activity(
-            f"Loan {loan.id} flagged for fraud: {', '.join(flags)}"
-        )
+
+        for entry in flags:
+            reason = entry.get("reason")
+            comments = entry.get("comments", "")
+            loan.flag_as_fraud(reason=reason, comments=comments)
+
+        AuditService.log_activity(f"Loan {loan.id} flagged for fraud: {flags}")
         admins = LoanAdmin.objects.values_list("email", flat=True)
         if len(admins) > 0:
-            AuditService.alert(admins, message=f"Loan {loan.id} flagged for fraud.")
+            AuditService.alert(
+                list(admins),
+                message=f"[FRAUD ALERT!] Loan {loan.id} flagged for fraud. ",
+            )
 
     def suspicious_email_domain(self, user: Customer) -> bool:
         """
@@ -103,6 +107,33 @@ class FraudDetectionService:
         )
         return recent_loans.count() > threshold
 
+    def duplicate_account(self, user: "Customer") -> bool:
+        """
+        Check if the user has multiple accounts with profile information that matches.
+
+        here, we consider if we have any of the following matches:
+        - first name, last name, date of birth (if available), phone number (if available)
+        """
+
+        query = Q()
+
+        if user.email:
+            query |= Q(email=user.email)
+
+        if user.first_name:
+            query |= Q(first_name=user.first_name)  # type: ignore
+
+        if user.last_name:
+            query |= Q(last_name=user.last_name)  # type: ignore
+
+        if user.date_of_birth:
+            query |= Q(date_of_birth=user.date_of_birth)  # type: ignore
+
+        if hasattr(user, "phone_number") and user.phone_number:
+            query |= Q(phone_number=user.phone_number)  # type: ignore
+
+        return Customer.objects.filter(query).exclude(id=user.id).exists()
+
     def _amount_exceeds_limit(self, loan_application: "LoanApplication") -> bool:
         """
         Check if the loan amount exceeds the maximum limit.
@@ -122,20 +153,22 @@ class FraudDetectionService:
         flags = []
 
         if self.too_many_applications(loan.user):
-            flags.append(
-                "User has submitted too many applications in the last 24 hours."
-            )
+            flags.append(FraudFlag.Reason.TOO_MANY_APPLICATIONS)
 
         if self.suspicious_email_domain(loan.user):
-            flags.append("Email domain is suspicious.")
+            flags.append(FraudFlag.Reason.SUSPICIOUS_ACTIVITY)
 
         if self._amount_exceeds_limit(loan):
-            flags.append("Loan amount exceeds the maximum limit.")
+            flags.append(FraudFlag.Reason.HIGH_RISK_PROFILE)
+
+        if self.duplicate_account(loan.user):
+            flags.append(FraudFlag.Reason.SUSPICIOUS_ACTIVITY)
+            flags.append(FraudFlag.Reason.INCONSISTENT_INFORMATION)
 
         if flags:
             self.flag_loan(loan, flags)
-            return {"status": "fraudulent", "flags": flags}
-        return {"status": "clean", "flags": []}  # at this point, no fraud detected
+            return {"status": FRAUD, "flags": flags}
+        return {"status": CLEAN, "flags": []}  # at this point, no fraud detected
 
 
 class AuditService:

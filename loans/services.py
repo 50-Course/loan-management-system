@@ -1,16 +1,44 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.utils.timezone import timezone
+from django.utils import timezone
 
 from loans.models import LoanApplication
-from users.models import BaseUser
+from users.models import BaseUser, Customer
 
 
 class LoanApplicationError(Exception):
     """Base class for loan application errors."""
 
     pass
+
+
+def check_eligibility(customer: "Customer") -> bool:
+    """
+    Check if the user is eligible for a loan.
+
+    Prevent users from submitting multiple loan applications within 24 hours.
+    """
+    if customer.flagged_for_fraud:
+        raise LoanApplicationError("User is flagged for fraud.")
+
+    last_24_hours = timezone.now() - timedelta(hours=24)
+    recent_loan = (
+        LoanApplication.objects.filter(
+            user=customer,
+            date_applied__gte=last_24_hours,
+        )
+        .order_by("-date_applied")
+        .first()
+    )
+
+    if recent_loan:
+        raise LoanApplicationError(
+            "You cannot submit another loan application within 24 hours of your last one."
+        )
+
+    return True
 
 
 @transaction.atomic
@@ -23,11 +51,11 @@ def submit_loan(user: "BaseUser", amount: Decimal, purpose: str) -> "LoanApplica
         raise LoanApplicationError("Only customers can submit loan applications.")
 
     customer = user.customer
+    check_eligibility(customer)
 
     # we are not using .create method because that would save our application
     # directly to the database, in-memory route is the way to go here so we can run our checks
     loan = LoanApplication(user=customer, amount_requested=amount, purpose=purpose)
-
     fraud_check_result = fraud_detection_service.run_fraud_checks(loan)
 
     if fraud_check_result["status"] == "fraudlent":
@@ -71,16 +99,17 @@ class LoanManagementService:
 
     def reject_loan(self, loan: "LoanApplication"):
         """Reject loan due to fraud suspicion."""
-        if loan.status != LoanApplication.Status.PENDING:
-            raise LoanApplicationError("Loan application is not in a pending state.")
+        if loan.status == LoanApplication.Status.APPROVED:
+            raise LoanApplicationError("Cannot reject an approved loan.")
+
+        if loan.status == LoanApplication.Status.REJECTED:
+            raise LoanApplicationError("Loan application has already been rejected.")
 
         loan.status = LoanApplication.Status.REJECTED
         loan.save()
         return loan
 
-    def flag_loan(
-        self, loan: "LoanApplication", flags: list
-    ) -> "LoanApplication":
+    def flag_loan(self, loan: "LoanApplication", flags: list) -> "LoanApplication":
         """
         Flag a loan as potentially fraudulent - Admin action.
         """
@@ -89,10 +118,6 @@ class LoanManagementService:
         if loan.status != LoanApplication.Status.PENDING:
             raise LoanApplicationError("Loan application is not in a pending state.")
 
-        loan.status = LoanApplication.Status.FLAGGED
-        loan.save()
-
-        # Log fraud flag details
         fraud_detection_service = FraudDetectionService()
         fraud_detection_service.flag_loan(loan, flags)
 

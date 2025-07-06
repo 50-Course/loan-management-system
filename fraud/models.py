@@ -9,6 +9,7 @@ class FraudFlag(models.Model):
     class Reason(models.TextChoices):
         # Reasons for flagging a loan application
         SUSPICIOUS_ACTIVITY = "SUSPICIOUS_ACTIVITY", "Suspicious Activity"
+        TOO_MANY_APPLICATIONS = "TOO_MANY_APPLICATIONS", "Too Many Applications"
         INCOMPLETE_KYC = "INCOMPLETE_KYC", "Incomplete KYC"
         INCONSISTENT_INFORMATION = (
             "INCONSISTENT_INFORMATION",

@@ -87,7 +87,12 @@ class LoanApplication(models.Model):
 
         Why you go dey find 1 grand loan if your earning power never touch base?
         """
-        return self.amount_requested > 1_000_000 and self.user.date_of_birth.year < 2000
+        dob = self.user.date_of_birth
+        if isinstance(dob, str):
+            from datetime import datetime
+
+            dob = datetime.strptime(dob, "%Y-%m-%d").date()
+        return self.amount_requested > 1_000_000 and dob.year < 2000
 
     class Meta:
         ordering = ["-date_applied"]

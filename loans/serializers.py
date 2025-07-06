@@ -22,10 +22,9 @@ class ErrorResponseSerializer(serializers.Serializer):
         required=False,
         default=400,
     )
-    detail = serializers.CharField(
+    detail = serializers.JSONField(
         help_text="Detailed description of the error, if available.",
         required=False,
-        allow_blank=True,
     )
 
 
@@ -86,7 +85,7 @@ class FlagLoanResponse(serializers.Serializer):
 
 class FlaggedLoanSerializer(serializers.ModelSerializer):
     # Displays flagged loans for admin view
-    user_profile = UserSummarySerializer()
+    user_profile = UserSummarySerializer(source="user", read_only=True)
     loan_id = serializers.IntegerField(source="id", read_only=True)
     fraud_flags = serializers.SerializerMethodField(
         help_text="List of reasons for flagging the loan application as potential fraud.",
@@ -108,7 +107,7 @@ class FlaggedLoanSerializer(serializers.ModelSerializer):
 
 class AdminViewLoanApplicationSerializer(serializers.ModelSerializer):
     # Serializes loan applications for admin view - works best for many loan applications.
-    user_profile = UserSummarySerializer()
+    user_profile = UserSummarySerializer(source="user", read_only=True)
     loan_id = serializers.IntegerField(source="id", read_only=True)
 
     class Meta:
@@ -150,16 +149,6 @@ class LoanApplicationRequest(serializers.ModelSerializer):
         extra_kwargs = {
             "id": {"read_only": True},
             "user": {"read_only": True},
-            "amount_requested": {
-                "max_digits": 10,
-                "decimal_places": 2,
-                "help_text": "Amount needed by the customer for the loan",
-            },
-            "purpose": {
-                # "max_length": 20,
-                "choices": LoanApplication.Purpose.choices,
-                "help_text": "Purpose of the loan application",
-            },
         }
 
 
