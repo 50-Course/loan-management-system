@@ -160,9 +160,6 @@ class LoanManagementTestCase(APITestCase):
 
         # exceeded maximum amount
         loan = fake_loan(self.customer, amount_requested=6_000_000, purpose="BUSINESS")
-        print(
-            f"Loan ID: {loan.id} | Loan Amount: {loan.amount_requested} | Status: {loan.status}"
-        )
         payload = [
             {
                 "reason": "HIGH_RISK_PROFILE",
@@ -176,14 +173,14 @@ class LoanManagementTestCase(APITestCase):
 
         # mock to identify if requested amount pattern is suspicious
         response = self.client.post(self.flag_url(loan.id), data=payload, format="json")
-        print(response.data)
-        # self.assertEqual(loan.status, "FLAGGED")
-        # self.assertTrue(loan.fraud_flags.exists())
-        # self.assertTrue(loan.fraud_flags.count() > 0)
-        # self.assertSetEqual(
-        #     set(loan.fraud_flags.values_list("reason", flat=True)),
-        #     {"HIGH_RISK_PROFILE", "TOO_MANY_APPLICATIONS"},
-        # )
+        loan.refresh_from_db()
+        self.assertEqual(loan.status, "FLAGGED")
+        self.assertTrue(loan.fraud_flags.exists())
+        self.assertTrue(loan.fraud_flags.count() > 0)
+        self.assertSetEqual(
+            set(loan.fraud_flags.values_list("reason", flat=True)),
+            {"HIGH_RISK_PROFILE", "TOO_MANY_APPLICATIONS"},
+        )
 
 
 class FraudDetectionTestCase(TestCase):
