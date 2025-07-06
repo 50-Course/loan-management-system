@@ -83,6 +83,12 @@ class Customer(BaseUser):
     USERNAME_FIELD = "phone_number"
     REQUIRED_FIELDS = ["role", "first_name", "last_name"]
 
+    flagged_for_fraud = models.BooleanField(
+        default=False,
+        verbose_name="Flagged for Fraud",
+        help_text="Indicates if the customer has been flagged for suspicious activity.",
+    )
+
     class Meta:
         verbose_name = "Customer"
         verbose_name_plural = "Customers"
