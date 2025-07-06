@@ -35,8 +35,8 @@ jobs:
 
       - name: tests + coverage
         run: |
-          uv run pytest --ds=your_project.settings \
-            --cov=your_app \
+          uv run pytest --ds=core.settings \
+            --cov=uv \
             --cov-report=xml \
             --cov-report=html \
             --cov-fail-under=80
