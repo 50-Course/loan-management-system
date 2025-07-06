@@ -84,52 +84,6 @@ class FlagLoanResponse(serializers.Serializer):
     fraud_flag_id = serializers.IntegerField(help_text="ID of the created fraud flag.")
 
 
-class LoanDetailedSerializer(serializers.ModelSerializer):
-    # custom representation for loan details
-    loan_id = serializers.IntegerField(source="id", read_only=True)
-    loan_amount = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        source="amount_requested",
-        help_text="Amount requested for the loan.",
-    )
-    loan_purpose = serializers.CharField(
-        source="purpose",
-        help_text="Purpose of the loan application.",
-    )
-    status = serializers.CharField(
-        source="status",
-        help_text="Current status of the loan application.",
-    )
-    date_applied = serializers.DateTimeField(
-        format="%Y-%m-%d %H:%M:%S",
-        source="date_applied",
-        help_text="Date and time when the loan application was submitted.",
-    )
-    date_updated = serializers.DateTimeField(
-        format="%Y-%m-%d %H:%M:%S",
-        source="date_updated",
-        required=False,
-        help_text="Date and time when the loan application was last updated",
-    )
-
-    class Meta:
-        model = LoanApplication
-        fields = [
-            "loan_amount",
-            "loan_purpose",
-            "status",
-            "date_applied",
-            "date_updated",
-        ]
-
-
-class LoanDetailSerializer(serializers.Serializer):
-    # Combines user profile and loan details for detailed view
-    user_profile = UserSummarySerializer()
-    loan_details = LoanDetailedSerializer()
-
-
 class FlaggedLoanSerializer(serializers.ModelSerializer):
     # Displays flagged loans for admin view
     user_profile = UserSummarySerializer()
@@ -141,6 +95,15 @@ class FlaggedLoanSerializer(serializers.ModelSerializer):
 
     def get_fraud_flags(self, obj) -> list:
         return [flag.reason for flag in obj.fraud_flags.value_list("reason", flat=True)]
+
+    class Meta:
+        model = LoanApplication
+        fields = [
+            "user_profile",
+            "loan_id",
+            "fraud_flags",
+            "comments",
+        ]
 
 
 class AdminViewLoanApplicationSerializer(serializers.ModelSerializer):
