@@ -26,7 +26,14 @@ SECRET_KEY = "django-insecure-kci5_c&()7bp^7j9z7y_)1skj8-a5k)lwzjoxjtu#4jj+tc(8(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*.railway.app", "localhost", "127.0.0.1", "*.onrender.com"]
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "railway.app",
+    "qc-loan-app-production.up.railway.app",
+    "*.railway.app",
+    "*.onrender.com",
+]
 
 
 # Application definition
