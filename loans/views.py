@@ -1,5 +1,6 @@
 import logging
 
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (OpenApiParameter, OpenApiRequest,
                                    OpenApiResponse, extend_schema,
                                    extend_schema_view)
@@ -11,13 +12,17 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from fraud.services import FraudDetectionError
+from loans.filters import LoanApplicationFilter
 from loans.models import LoanApplication
-from loans.serializers import (LoanApplicationResponse,
-                               LoanApplicationSerializer)
+from loans.serializers import (AdminViewLoanApplicationSerializer,
+                               LoanApplicationResponse,
+                               MyLoanApplicationSerializer)
 from loans.services import LoanApplicationError, LoanManagementService
 from permissions import IsCustomer, IsLoanAdmin
 
-from .serializers import LoanApplicationRequest
+from .serializers import (ErrorResponseSerializer, FlaggedLoanSerializer,
+                          FlagLoanRequest, FlagLoanResponse,
+                          LoanApplicationRequest)
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +62,15 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 response=LoanApplicationResponse,
                 description="Loan application details",
             ),
-            404: OpenApiResponse(description="Loan application not found"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            404: OpenApiResponse(
+                ErrorResponseSerializer, description="Loan application not found"
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=True, methods=["get"], url_path="loan", url_name="retrieve_loan")
@@ -67,10 +78,16 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         """
         Retrieve a specific loan application by ID.
         """
-        loan_id = kwargs.get("pk")
+        loan_id = kwargs.get("id")
         if not loan_id:
             return Response(
-                {"error": "Loan ID is required."},
+                ErrorResponseSerializer(
+                    {
+                        "status": "error",
+                        "error": "Loan ID is required",
+                        "code": 400,
+                    }
+                ).data,
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -80,22 +97,34 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except LoanApplication.DoesNotExist:
             return Response(
-                {"error": "Loan application not found."},
+                ErrorResponseSerializer(
+                    {
+                        "status": "error",
+                        "error": "Loan application not found",
+                        "code": 404,
+                    }
+                ).data,
                 status=status.HTTP_404_NOT_FOUND,
             )
 
     @extend_schema(
         operation_id="customer_loan_retrieve",
-        summary="View all my loan applications",
+        summary="View my loan applications",
         description="Retrieve all loan applications for the authenticated customer.",
         responses={
             200: OpenApiResponse(
                 description="List of loan applications",
-                response=LoanApplicationResponse,
+                response=MyLoanApplicationSerializer(many=True),
             ),
-            404: OpenApiResponse(description="Loan application not found"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            404: OpenApiResponse(
+                ErrorResponseSerializer, description="Loan application not found"
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=False, methods=["get"], url_path="requests")
@@ -103,13 +132,21 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         """
         Retrieve all loan applications for the authenticated user.
         """
-        user = request.user
-        applications = user.loan_applications.all()
-        serializer = LoanApplicationResponse(applications, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        try:
+            loans = LoanApplication.objects.filter(user=request.user)
+            serializer = MyLoanApplicationSerializer(loans, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error retrieving loan applications: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "error", "error": str(e), "code": 500}
+                ).data,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @extend_schema(
-        summary="Submit a new loan application",
+        summary="Apply for a loan",
         description="Submit a new loan application for the authenticated customer.",
         request=OpenApiRequest(request=LoanApplicationRequest),
         responses={
@@ -117,9 +154,15 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 description="Loan application created successfully",
                 response=LoanApplicationResponse,
             ),
-            400: OpenApiResponse(description="Invalid request data"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="Invalid request data"
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=False, methods="post", url_path="loan")
@@ -131,15 +174,15 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
         """
         from loans import services as loan_service
 
-        user = request.user
-
         serializer = LoanApplicationRequest(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         loan_data = serializer.validated_data
         try:
             loan = loan_service.submit_loan(
-                user, amount=loan_data["amount_requested"], purpose=loan_data["purpose"]
+                user=request.user,  # type: ignore[assignment]
+                amount=loan_data["amount_requested"],  # type: ignore[assignment]
+                purpose=loan_data["purpose"],  # type: ignore[assignment]
             )
             loan_response = LoanApplicationResponse(loan)
             return Response(
@@ -150,18 +193,35 @@ class LoanApplicationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_201_CREATED,
             )
         except FraudDetectionError as err:
-            return Response({"error": str(err)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.warning(f"Loan application flagged for fraud: {str(err)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "flagged", "error": str(err), "code": 400}
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except LoanApplicationError as err:
             logger.error(f"Loan submission failed for user {user.id}: {str(err)}")
             return Response(
-                {"message": "Loan submission failed.", "error": str(err)},
-                status=status.HTTP_403_FORBIDDEN
-                if "Only customers can submit loans" in str(err)
-                else status.HTTP_400_BAD_REQUEST,
+                ErrorResponseSerializer(
+                    {"status": "error", "error": str(err), "code": 403}
+                ).data,
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except PermissionDenied as err:
+            logger.error(f"Permission denied for user {request.user.id}: {str(err)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "permission_denied", "error": str(err), "code": 403}
+                ).data,
+                status=status.HTTP_403_FORBIDDEN,
             )
         except Exception as e:
+            logger.error(f"Unexpected error during loan submission: {str(e)}")
             return Response(
-                {"error": str(e)},
+                ErrorResponseSerializer(
+                    {"status": "fail", "error": str(e), "code": 500}
+                ).data,
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -177,8 +237,10 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsLoanAdmin, permissions.IsAuthenticated]
     http_method_names = ["get", "post"]
-    serializer_class = LoanApplicationSerializer
-    queryset = LoanApplication.objects.all()
+    queryset = LoanApplication.objects.select_related("user").all()
+
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = LoanApplicationFilter
 
     @classmethod
     def get_extra_actions(cls):
@@ -192,40 +254,59 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         operation_id="admin_loan_retrieve",
-        summary="Retrieve a specific loan application - Admin Only",
-        description="Admin can view details of a specific loan application by ID",
+        summary="Get a specific loan application -  Admin Only",
+        description="Retrieve detailed information of a specific loan application using its ID",
         responses={
             200: OpenApiResponse(
-                response=LoanApplicationSerializer,
+                response=AdminViewLoanApplicationSerializer,
                 description="Loan application details",
             ),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(
         detail=True, methods=["get"], url_path="loan", url_name="retrieve_customer_loan"
     )
-    def retrieve_customer_loan(self, request, pk=None):
+    def retrieve_customer_loan(self, request, id=None):
         """
         Admin views a specific loan application by ID.
         """
-        loan = get_object_or_404(LoanApplication, pk)
-        serializer = LoanApplicationSerializer(loan)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        try:
+            loan = LoanApplication.objects.get(id=id)
+            serializer = AdminViewLoanApplicationSerializer(loan)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except LoanApplication.DoesNotExist:
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "error",
+                        "error": "Loan Application not found",
+                        "code": 404,
+                    }
+                ).data,
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
     @extend_schema(
         operation_id="admin_all_loans",
-        summary="Retrieve all loan applications - Admin Only",
-        description="Admin can view all loan applications",
+        summary="Get all loan applications -  Admin Only",
+        description="Retrieve all loan applications. Supports filters like status, user_email, date range.",
         responses={
             200: OpenApiResponse(
                 description="List of all loan applications",
-                response=LoanApplicationSerializer,
+                response=AdminViewLoanApplicationSerializer(many=True),
             ),
-            404: OpenApiResponse(description="No loan applications found"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=False, methods=["get"])
@@ -233,27 +314,50 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
         """
         Admin can view all loan applications.
         """
-        loans = LoanApplication.objects.all()
-        serializer = LoanApplicationSerializer(loans, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        try:
+            loans = LoanApplication.objects.all()
+            serializer = AdminViewLoanApplicationSerializer(loans, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except PermissionDenied as e:
+            logger.error(f"Permission denied for admin: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "permission_denied", "error": str(e), "code": 403}
+                ).data,
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving all loans: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "error", "error": str(e), "code": 500}
+                ).data,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @extend_schema(
         operation_id="admin_loan_approve",
-        summary="Approve a loan application - Admin Only",
-        description="Approve a loan application",
+        summary="Approve a loan - Admin Only",
+        description="Approve a customer's loan application",
         responses={
-            200: OpenApiResponse(description="Loan application approved"),
-            400: OpenApiResponse(description="Error approving loan application"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            200: OpenApiResponse(description="Loan Approved"),
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="Error approving loan application"
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=True, methods=["post"], url_path="approve")
-    def approve(self, request, pk=None):
+    def approve(self, request, id=None):
         """
         Admin approves a loan application.
         """
-        if not pk:
+        if not id:
             return Response(
                 {"error": "Loan ID is required for approval."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -261,87 +365,163 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
 
         loan_service = LoanManagementService()
         try:
-            loan = loan_service.approve_loan(pk)
-            return Response({"status": "approved"}, status=status.HTTP_200_OK)
+            loan = loan_service.approve_loan(id)
+            loan_data = LoanApplicationResponse(loan).data
+            return Response(
+                {
+                    "status": "approved",
+                    "loan_details": loan_data,
+                },
+                status=status.HTTP_200_OK,
+            )
         except LoanApplicationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.error(f"Error approving loan {id}: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "error", "error": str(e), "code": 400}
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @extend_schema(
-        summary="Reject a loan application - Admin Only",
-        description="Reject a loan application by ID",
+        summary="Reject a loan - Admin Only",
+        description="Reject a loan application and provide reason if applicable",
         responses={
-            200: OpenApiResponse(description="Loan application rejected"),
-            400: OpenApiResponse(description="Error rejecting loan application"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            200: OpenApiResponse(description="Loan rejected"),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=True, methods=["post"], url_path="reject")
-    def reject(self, request, pk=None):
+    def reject(self, request, id=None):
         """
         Admin rejects a loan application.
         """
         loan_service = LoanManagementService()
 
-        if not pk:
+        if not id:
             return Response(
                 {"error": "Loan ID is required for rejection."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            loan = loan_service.reject_loan(pk)
-            return Response({"status": "rejected"}, status=status.HTTP_200_OK)
+            loan = loan_service.reject_loan(id)
+            loan_data = LoanApplicationResponse(loan).data
+            return Response(
+                {
+                    "status": "rejected",
+                    "loan_details": loan_data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except PermissionDenied as e:
+            logger.error(f"Permission denied for rejecting loan {id}: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "permission_denied",
+                        "error": "Only loan administrators are authorized to perform this operation",
+                        "code": 403,
+                        "detail": str(e),
+                    }
+                ).data,
+                status=status.HTTP_403_FORBIDDEN,
+            )
         except LoanApplicationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.error(f"Error rejecting loan {id}: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "error", "error": str(e), "code": 400}
+                ).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @extend_schema(
-        summary="Flag a loan application for potential fraud - Admin Only",
-        description="Admin flags a loan application for potential fraud",
+        summary="Flag Loan - Admin Only",
+        description="Mark a loan as suspicious (potential fraud) for manual review",
+        request=OpenApiRequest(request=FlagLoanRequest(many=True)),
         responses={
-            201: OpenApiResponse(description="Loan application flagged for fraud"),
-            400: OpenApiResponse(description="Error flagging loan application"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            200: OpenApiResponse(
+                FlagLoanResponse, description="Loan application flagged for fraud"
+            ),
+            400: OpenApiResponse(
+                ErrorResponseSerializer, description="Error flagging loan application"
+            ),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=True, methods=["post"], url_path="flag")
-    def flag(self, request, pk=None):
+    def flag(self, request, id=None):
         """
         Admin flags a loan application for potential fraud.
+        Accepts a list of fraud reasons and comments.
         """
 
-        flags = request.data.get("flags", [])
+        serializer = FlagLoanRequest(data=request.data, many=True)
+        serializer.is_valid(raise_exception=True)
+        validated_flags = serializer.validated_data
+
         loan_service = LoanManagementService()
 
-        if not pk:
+        if not id:
             return Response(
                 {"error": "Loan ID is required for flagging."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            loan = loan_service.flag_loan(pk, flags)
+            loan = loan_service.flag_loan(id, validated_flags)  # type: ignore
             return Response(
                 {
                     "status": "flagged",
                     "loan_id": loan.id,
-                    "message": "Application request successfully flagged for fraud.",
+                    "message": "Application flagged for fraud",
+                    "flags": serializer.validated_data,
                 },
-                status=status.HTTP_201_CREATED,
+                status=status.HTTP_200_OK,
             )
         except LoanApplicationError as err:
-            return Response({"error": str(err)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                ErrorResponseSerializer({"status": "error", "error": str(err)}).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except PermissionDenied as err:
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "permission_denied",
+                        "error": "Only loan administrators are authorized to perform this operation",
+                        "code": 403,
+                        "detail": str(err),
+                    },
+                ).data,
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
     @extend_schema(
-        summary="View all flagged loan applications - Admin Only",
-        description="Admin can view all flagged loan applications",
+        summary="Get all flagged loans - Admin Only",
+        description="Retrieve all loans flagged for fraud review",
         responses={
             200: OpenApiResponse(
-                description="List of flagged loans", response=LoanApplicationResponse
+                description="List of flagged loans",
+                response=FlaggedLoanSerializer(many=True),
             ),
             404: OpenApiResponse(description="No flagged loans found"),
-            403: OpenApiResponse(description="Permission denied"),
-            500: OpenApiResponse(description="Internal server error"),
+            403: OpenApiResponse(
+                ErrorResponseSerializer, description="Permission denied"
+            ),
+            500: OpenApiResponse(
+                ErrorResponseSerializer, description="Internal server error"
+            ),
         },
     )
     @action(detail=False, methods=["get"], url_path="flagged")
@@ -349,8 +529,30 @@ class LoanAdminViewSet(viewsets.ModelViewSet):
         """
         Admin-only endpoint to view all flagged loans
         """
-        flagged_loans = LoanApplication.objects.filter(
-            status=LoanApplication.Status.FLAGGED
-        )
-        flagged_loans_response = LoanApplicationResponse(flagged_loans, many=True)
-        return Response(flagged_loans_response, status.HTTP_200_OK)
+        try:
+            flagged_loans = LoanApplication.objects.filter(
+                status=LoanApplication.Status.FLAGGED
+            )
+            flagged_loans_data = FlaggedLoanSerializer(flagged_loans, many=True).data
+            return Response(flagged_loans_data, status.HTTP_200_OK)
+        except PermissionDenied as e:
+            logger.error(f"Permission denied for retrieving flagged loans: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {
+                        "status": "permission_denied",
+                        "error": "Only loan administrators is authorized to perform this operation",
+                        "code": 403,
+                        "detail": str(e),
+                    },
+                ).data,
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving flagged loans: {str(e)}")
+            return Response(
+                ErrorResponseSerializer(
+                    {"status": "error", "error": str(e), "code": 500}
+                ).data,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

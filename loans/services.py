@@ -78,7 +78,9 @@ class LoanManagementService:
         loan.save()
         return loan
 
-    def flag_loan(self, loan: "LoanApplication", flags: list) -> "LoanApplication":
+    def flag_loan(
+        self, loan: "LoanApplication", flags: list
+    ) -> "LoanApplication":
         """
         Flag a loan as potentially fraudulent - Admin action.
         """
